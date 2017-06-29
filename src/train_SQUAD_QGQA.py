@@ -16,7 +16,7 @@ from cis.deep.utils.theano import debug_print
 
 from load_SQUAD import load_QGQA, load_glove, refine_decoder_predictions, extract_ansList_attentionList, extract_ansList_attentionList_maxlen5, MacroF1, load_word2vec, load_word2vec_to_init
 from word2embeddings.nn.util import zero_value, random_value_normal
-from common_functions import Bd_LSTM_Batch_Tensor_Input_with_Mask_Concate,LSTM_Decoder_Test_with_Mask, load_model_from_file, store_model_to_file, create_LSTM_para, Bd_LSTM_Batch_Tensor_Input_with_Mask, LSTM_Decoder_Train_with_Mask, create_ensemble_para, create_GRU_para, normalize_matrix, create_conv_para, Matrix_Bit_Shift, Conv_with_input_para, L2norm_paraList
+from common_functions import Bd_LSTM_Batch_Tensor_Input_with_Mask_Concate,LSTM_Decoder_Test_with_Mask, LSTM_Decoder_Train_with_Attention, LSTM_Decoder_Test_with_Attention,store_model_to_file, create_LSTM_para, Bd_LSTM_Batch_Tensor_Input_with_Mask, LSTM_Decoder_Train_with_Mask, create_ensemble_para, create_GRU_para, normalize_matrix, create_conv_para, Matrix_Bit_Shift, Conv_with_input_para, L2norm_paraList
 from random import shuffle
 
 
@@ -126,13 +126,18 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=60, test_batch
     
     decoder_para_dict=create_LSTM_para(rng, emb_size+12*hidden_size, emb_size)
     
+    attention_para_dict1=create_LSTM_para(rng, 2*hidden_size, hidden_size)
+    attention_para_dict2=create_LSTM_para(rng, 2*hidden_size, hidden_size)
+    
 
     
     '''
     train
     '''
     groundtruth_as_input = T.concatenate([T.alloc(np.asarray(0., dtype=theano.config.floatX),true_batch_size,emb_size,1), q_input[:,:,:-1]], axis=2)
-    decoder =  LSTM_Decoder_Train_with_Mask(groundtruth_as_input, encoder_reps, decoder_vocab_embs, q_mask, emb_size, decoder_para_dict)
+#     decoder =  LSTM_Decoder_Train_with_Mask(groundtruth_as_input, encoder_reps, decoder_vocab_embs, q_mask, emb_size, decoder_para_dict)
+#X, Encoder_Tensor_Rep, Encoder_Mask, start_indices, end_indices, vocab_embs, Mask, emb_size, hidden_size, tparams, attention_para_dict1, attention_para_dict2
+    decoder = LSTM_Decoder_Train_with_Attention(groundtruth_as_input, paragraph_reps_tensor3, para_mask, start_indices, end_indices, decoder_vocab_embs,q_mask,emb_size,hidden_size,decoder_para_dict,attention_para_dict1, attention_para_dict2)
     
     prob_matrix = decoder.prob_matrix  #(batch*senlen, decoder_vocab_size)
     probs = prob_matrix[T.arange(true_batch_size*q_len_limit),questions_decoderIDS.flatten()]
@@ -145,7 +150,7 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=60, test_batch
 
     loss=-T.mean(T.log(probs))+T.mean(T.exp(probs_to_minimize))
     cost=loss#+ConvGRU_1.error#
-    params = [embeddings]+paragraph_para+decoder_para_dict.values()
+    params = [embeddings]+paragraph_para+decoder_para_dict.values()+attention_para_dict1.values()+attention_para_dict2.values()
 
     accumulator=[]
     for para_i in params:
@@ -172,7 +177,9 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=60, test_batch
     '''
     testing
     '''
-    test_decoder =  LSTM_Decoder_Test_with_Mask(q_len_limit, encoder_reps, decoder_vocab_embs, emb_size, decoder_para_dict)
+#     test_decoder =  LSTM_Decoder_Test_with_Mask(q_len_limit, encoder_reps, decoder_vocab_embs, emb_size, decoder_para_dict)
+#nsteps, Encoder_Tensor_Rep, Encoder_Mask, start_indices, end_indices, vocab_embs, emb_size,hidden_size, tparams,attention_para_dict1, attention_para_dict2
+    test_decoder = LSTM_Decoder_Test_with_Attention(q_len_limit,paragraph_reps_tensor3, para_mask, start_indices, end_indices, decoder_vocab_embs, emb_size,hidden_size,decoder_para_dict,attention_para_dict1, attention_para_dict2)
     predictions = test_decoder.output_id_matrix #(batch, q_len_limit)
 
 
