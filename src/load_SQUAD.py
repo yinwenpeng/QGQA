@@ -1082,6 +1082,24 @@ def transfer_wordlist_2_idlist_with_maxlen(token_list, vocab_map, maxlen):
         idlist=idlist[:maxlen]
         mask_list=mask_list[:maxlen]
     return idlist, mask_list
+
+def extract_wh_words(tokenlist, vocab_map, maxlen):
+    #maxlen =2 if consider two words
+    idlist=[]
+    sentlen =len(tokenlist)
+    for i, word in enumerate(tokenlist):
+        if word[:2]=='wh' or word[:2]=='Wh':
+            idlist.append(vocab_map.get(word))
+            if i < sentlen-1:
+                for j in range(1,maxlen):
+                    if i+j < sentlen:
+                        idlist.append(vocab_map.get(tokenlist[i+j]))
+                    else:
+                        break
+            break
+    return idlist
+            
+
 def rightpad_idlist_padsize(idlist, maxlen):
     valid_size=len(idlist)
     pad_size=maxlen-valid_size
@@ -1690,7 +1708,8 @@ def load_QGQA(word2id, max_para_len, max_q_len, top_n_Qwords, train):
                 end = len(left+ans)-1
                 
             q_idlist, q_masklist=transfer_wordlist_2_idlist_with_maxlen(question, word2id, max_q_len)    
-            top_q_wordid, _ = transfer_wordlist_2_idlist_with_maxlen(question[:top_n_Qwords], word2id, top_n_Qwords) 
+#             top_q_wordid, _ = transfer_wordlist_2_idlist_with_maxlen(question[:top_n_Qwords], word2id, top_n_Qwords) 
+            top_q_wordid = extract_wh_words(question, word2id, top_n_Qwords)
             top_n_Q_wordids|=set(top_q_wordid) 
             #store
             paras.append(para_idlist)
@@ -2949,8 +2968,8 @@ def refine_decoder_predictions(predlist, grounds, masklist):
                     preds.append(value)
             else:
                 preds.append(value)
-        else:
-            break
+#         else:
+#             break
     i=len(masklist)-1
     while masklist[i]==0:
         i-=1

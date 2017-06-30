@@ -28,8 +28,8 @@ from random import shuffle
 2) combine google and ai2
 '''
 
-def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=60, test_batch_size=10000, emb_size=50, hidden_size=50,
-                    L2_weight=0.0001, para_len_limit=70, q_len_limit=20, top_n_Qwords=2):
+def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=300, test_batch_size=10000, emb_size=50, hidden_size=50,
+                    L2_weight=0.0001, para_len_limit=70, q_len_limit=20, pred_q_len_limit=50, top_n_Qwords=1):
 
     model_options = locals().copy()
     print "model options", model_options
@@ -38,7 +38,7 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=60, test_batch
 
 
     word2id = {}
-    train_para_list, train_para_mask, train_Q_list, train_Q_mask, train_start_list,train_end_list, train_top_Q_wordids, word2id=load_QGQA(word2id, para_len_limit,q_len_limit, top_n_Qwords, True)
+    train_para_list, train_para_mask, train_Q_list, train_Q_mask, train_start_list,train_end_list, _, word2id=load_QGQA(word2id, para_len_limit,q_len_limit, top_n_Qwords, True)
     train_size=len(train_para_list)
     if train_size!=len(train_Q_list) or train_size!=len(train_start_list) or train_size!=len(train_para_mask):
         print 'train_size!=len(Q_list) or train_size!=len(label_list) or train_size!=len(para_mask)'
@@ -52,21 +52,21 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=60, test_batch
 
     train_Q_list = np.asarray(train_Q_list, dtype='int32')
     train_Q_mask = np.asarray(train_Q_mask, dtype=theano.config.floatX)
-    
+
     train_start_list = np.asarray(train_start_list, dtype='int32')
-    train_end_list = np.asarray(train_end_list, dtype='int32')    
+    train_end_list = np.asarray(train_end_list, dtype='int32')
 
     test_para_list = np.asarray(test_para_list, dtype='int32')
     test_para_mask = np.asarray(test_para_mask, dtype=theano.config.floatX)
 
     test_Q_list = np.asarray(test_Q_list, dtype='int32')
     test_Q_mask = np.asarray(test_Q_mask, dtype=theano.config.floatX)
-    
+
     test_start_list = np.asarray(test_start_list, dtype='int32')
-    test_end_list = np.asarray(test_end_list, dtype='int32')  
-    
+    test_end_list = np.asarray(test_end_list, dtype='int32')
+
     vocab_size = len(word2id)+1
-    
+
 #     shared_decoder_mask = [0]*vocab_size
 #     shared_decoder_mask[0]=1#we need this pad token in generated text
 #     for id in train_top_Q_wordids:
@@ -74,17 +74,27 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=60, test_batch
 #     shared_decoder_mask=theano.shared(value=np.asarray(shared_decoder_mask, dtype='int32'), borrow=True)  #
 
 
-   
+
     rand_values=random_value_normal((vocab_size, emb_size), theano.config.floatX, np.random.RandomState(1234))
     rand_values[0]=np.array(np.zeros(emb_size),dtype=theano.config.floatX)
     id2word = {y:x for x,y in word2id.iteritems()}
     word2vec=load_glove()
     rand_values=load_word2vec_to_init(rand_values, id2word, word2vec)
     embeddings=theano.shared(value=rand_values, borrow=True)
+    
+    train_top_Q_wordids=set()
+    wh_words=['What','Which','Where', 'When','Who', 'Whom','Whose', 'Why', 'How', 'far', 'many', 'much', 'long']
+    for word in wh_words:
+        idd = word2id.get(word)
+        if idd is not None:
+            train_top_Q_wordids.add(idd)
+        iddd = word2id.get(word.lower())
+        if iddd is not None:
+            train_top_Q_wordids.add(iddd)
 
 
     paragraph = T.imatrix('paragraph')
-    questions_encoderIDs = T.imatrix() # is ground truth, 
+    questions_encoderIDs = T.imatrix() # is ground truth,
     questions_decoderIDS = T.imatrix() #note we convert then from encoder vocab id to decoder vocab id
     decoder_vocab = T.ivector()
     start_indices= T.ivector() #batch
@@ -103,34 +113,34 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=60, test_batch
     paragraph_input = embeddings[paragraph.flatten()].reshape((true_batch_size, para_len_limit, emb_size)).dimshuffle(0, 2,1) #(batch, emb_size, para_len)
     q_input = embeddings[questions_encoderIDs.flatten()].reshape((true_batch_size, q_len_limit, emb_size)).dimshuffle(0, 2,1)
     decoder_vocab_embs = embeddings[decoder_vocab]
-    
-    
+
+
     fwd_LSTM_para_dict=create_LSTM_para(rng, emb_size, hidden_size)
     bwd_LSTM_para_dict=create_LSTM_para(rng, emb_size, hidden_size)
     paragraph_para=fwd_LSTM_para_dict.values()+ bwd_LSTM_para_dict.values()# .values returns a list of parameters
     paragraph_model=Bd_LSTM_Batch_Tensor_Input_with_Mask_Concate(paragraph_input, para_mask,  hidden_size, fwd_LSTM_para_dict, bwd_LSTM_para_dict)
     paragraph_reps_tensor3=paragraph_model.output_tensor #(batch, 2*hidden, paralen)
-    
+
     batch_ids=T.arange(true_batch_size)
     ans_heads=paragraph_reps_tensor3[batch_ids,:,start_indices]
     ans_tails=paragraph_reps_tensor3[batch_ids,:,end_indices]
-    
+
     l_context_heads = paragraph_reps_tensor3[:,:,0]
     l_context_tails = paragraph_reps_tensor3[batch_ids,:,start_indices-1]
-    
+
     r_context_heads = paragraph_reps_tensor3[batch_ids,:,end_indices+1]
     r_context_tails = paragraph_reps_tensor3[:,:,-1]
-    
+
     encoder_reps = T.concatenate([l_context_heads,l_context_tails, ans_heads, ans_tails, r_context_heads, r_context_tails], axis=1) #(batch, 6*2hidden_size)
-    
-    
+
+
     decoder_para_dict=create_LSTM_para(rng, emb_size+12*hidden_size, emb_size)
-    
+
     attention_para_dict1=create_LSTM_para(rng, 2*hidden_size, hidden_size)
     attention_para_dict2=create_LSTM_para(rng, 2*hidden_size, hidden_size)
-    
 
-    
+
+
     '''
     train
     '''
@@ -138,17 +148,19 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=60, test_batch
 #     decoder =  LSTM_Decoder_Train_with_Mask(groundtruth_as_input, encoder_reps, decoder_vocab_embs, q_mask, emb_size, decoder_para_dict)
 #X, Encoder_Tensor_Rep, Encoder_Mask, start_indices, end_indices, vocab_embs, Mask, emb_size, hidden_size, tparams, attention_para_dict1, attention_para_dict2
     decoder = LSTM_Decoder_Train_with_Attention(groundtruth_as_input, paragraph_reps_tensor3, para_mask, start_indices, end_indices, decoder_vocab_embs,q_mask,emb_size,hidden_size,decoder_para_dict,attention_para_dict1, attention_para_dict2)
-    
+
     prob_matrix = decoder.prob_matrix  #(batch*senlen, decoder_vocab_size)
     probs = prob_matrix[T.arange(true_batch_size*q_len_limit),questions_decoderIDS.flatten()]
+    mask_probs = probs[(q_mask.flatten()).nonzero()]
     #we shift question word ids so that in current step, the prob of previsouly predicted id gets lower and lower
     shifted_question_ids = T.concatenate([T.alloc(np.asarray(0, dtype='int32'),true_batch_size,1), questions_decoderIDS[:,:-1]], axis=1)
     probs_to_minimize = prob_matrix[T.arange(true_batch_size*q_len_limit),shifted_question_ids.flatten()]
+    mask_probs_to_minimize = probs_to_minimize[(q_mask.flatten()).nonzero()]
 
 
     #loss train
 
-    loss=-T.mean(T.log(probs))+T.mean(T.exp(probs_to_minimize))
+    loss=-T.mean(T.log(mask_probs))+T.mean(T.exp(mask_probs_to_minimize))
     cost=loss#+ConvGRU_1.error#
     params = [embeddings]+paragraph_para+decoder_para_dict.values()+attention_para_dict1.values()+attention_para_dict2.values()
 
@@ -179,7 +191,7 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=60, test_batch
     '''
 #     test_decoder =  LSTM_Decoder_Test_with_Mask(q_len_limit, encoder_reps, decoder_vocab_embs, emb_size, decoder_para_dict)
 #nsteps, Encoder_Tensor_Rep, Encoder_Mask, start_indices, end_indices, vocab_embs, emb_size,hidden_size, tparams,attention_para_dict1, attention_para_dict2
-    test_decoder = LSTM_Decoder_Test_with_Attention(q_len_limit,paragraph_reps_tensor3, para_mask, start_indices, end_indices, decoder_vocab_embs, emb_size,hidden_size,decoder_para_dict,attention_para_dict1, attention_para_dict2)
+    test_decoder = LSTM_Decoder_Test_with_Attention(pred_q_len_limit,paragraph_reps_tensor3, para_mask, start_indices, end_indices, decoder_vocab_embs, emb_size,hidden_size,decoder_para_dict,attention_para_dict1, attention_para_dict2)
     predictions = test_decoder.output_id_matrix #(batch, q_len_limit)
 
 
@@ -245,7 +257,7 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=60, test_batch
                 Decoder_train_Q_list.append(map_encoderid2decoderid.get(id))
             Decoder_train_Q_list = np.asarray(Decoder_train_Q_list, dtype='int32').reshape((batch_size, sub_Qs.shape[1]))
             decoder_vocab_batch = np.asarray(decoder_vocab_batch, dtype='int32')
-            
+
             cost_i+= train_model(
                                 train_para_list[para_id:para_id+batch_size],
                                 train_Q_list[para_id:para_id+batch_size],
@@ -257,13 +269,13 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=60, test_batch
                                 train_Q_mask[para_id:para_id+batch_size])
 
             #print iter
-            if iter%10==0:
+            if iter%100==0:
                 print 'Epoch ', epoch, 'iter '+str(iter)+' average cost: '+str(cost_i/iter), 'uses ', (time.time()-past_time)/60.0, 'min'
 #                 print 'Testing...'
                 past_time = time.time()
                 outputfile=codecs.open('output.txt', 'w', 'utf-8')
                 referencefile = codecs.open('reference.txt', 'w', 'utf-8')
-                 
+
                 bleu_scores = []
                 for idd, test_para_id in enumerate(test_batch_start):
                     sub_Qs = test_Q_list[test_para_id:test_para_id+test_batch_size]
@@ -287,22 +299,22 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=60, test_batch
                                         test_para_mask[test_para_id:test_para_id+test_batch_size])  #(batch, senlen)
                     ground_truths = sub_Qs
                     ground_mask = test_Q_mask[test_para_id:test_para_id+test_batch_size]
-                     
+
                     back_pred_id_in_batch=[map_decoderid2encoderid.get(id) for id in pred_id_in_batch.flatten()]
 
-                        
+
                     if idd == len(test_batch_start)-1:
                         true_test_batch_size = remain_test
                     else:
                         true_test_batch_size=test_batch_size
                     for i in range(true_test_batch_size):
 #                         print 'pred_id_in_batch[i]:', pred_id_in_batch[i]
-                        refined_preds, refined_g = refine_decoder_predictions(back_pred_id_in_batch[i*q_len_limit:(i+1)*q_len_limit], ground_truths[i], ground_mask[i])
+                        refined_preds, refined_g = refine_decoder_predictions(back_pred_id_in_batch[i*pred_q_len_limit:(i+1)*pred_q_len_limit], ground_truths[i], ground_mask[i])
 #                         bleu_i = nltk.translate.bleu_score.sentence_bleu([refined_g], refined_preds)
 #                         bleu_scores.append(bleu_i)
                         outputfile.write(' '.join([id2word.get(id) for id in refined_preds])+'\n')
                         referencefile.write(' '.join([id2word.get(id) for id in refined_g])+'\n')
-                 
+
 #                 bleuscore =  np.average(np.array(bleu_scores))
                 outputfile.close()
                 referencefile.close()
