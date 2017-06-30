@@ -97,6 +97,7 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=300, test_batc
     questions_encoderIDs = T.imatrix() # is ground truth,
     questions_decoderIDS = T.imatrix() #note we convert then from encoder vocab id to decoder vocab id
     decoder_vocab = T.ivector()
+    decoder_mask = T.fmatrix()  #(batch, decoder_vocab_size)
     start_indices= T.ivector() #batch
     end_indices = T.ivector() #batch
     para_mask=T.fmatrix('para_mask')
@@ -191,13 +192,13 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=300, test_batc
     '''
 #     test_decoder =  LSTM_Decoder_Test_with_Mask(q_len_limit, encoder_reps, decoder_vocab_embs, emb_size, decoder_para_dict)
 #nsteps, Encoder_Tensor_Rep, Encoder_Mask, start_indices, end_indices, vocab_embs, emb_size,hidden_size, tparams,attention_para_dict1, attention_para_dict2
-    test_decoder = LSTM_Decoder_Test_with_Attention(pred_q_len_limit,paragraph_reps_tensor3, para_mask, start_indices, end_indices, decoder_vocab_embs, emb_size,hidden_size,decoder_para_dict,attention_para_dict1, attention_para_dict2)
+    test_decoder = LSTM_Decoder_Test_with_Attention(pred_q_len_limit,paragraph_reps_tensor3, para_mask, start_indices, end_indices, decoder_vocab_embs, decoder_mask, emb_size,hidden_size,decoder_para_dict,attention_para_dict1, attention_para_dict2)
     predictions = test_decoder.output_id_matrix #(batch, q_len_limit)
 
 
     train_model = theano.function([paragraph, questions_encoderIDs,questions_decoderIDS, decoder_vocab, start_indices, end_indices,para_mask, q_mask], cost, updates=updates,on_unused_input='ignore')
 
-    test_model = theano.function([paragraph, decoder_vocab, start_indices, end_indices,para_mask], predictions, on_unused_input='ignore')
+    test_model = theano.function([paragraph, decoder_vocab, decoder_mask, start_indices, end_indices,para_mask], predictions, on_unused_input='ignore')
 
 
 
@@ -286,14 +287,33 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=300, test_batc
                     for encoderID in decoder_vocab_set:
                         decoderID= decoder_vocab_batch.index(encoderID)
                         map_decoderid2encoderid[decoderID] = encoderID
-#                     Decoder_train_Q_list = []
-#                     for id in sub_Qs.flatten():
-#                         Decoder_train_Q_list.append(map_encoderid2decoderid.get(id))
-#                     Decoder_train_Q_list = np.asarray(Decoder_train_Q_list, dtype='int32').reshape((batch_size, sub_Qs.shape[1]))
+
+                    if idd == len(test_batch_start)-1:
+                        true_test_batch_size = remain_test
+                    else:
+                        true_test_batch_size=test_batch_size                    
+                    #decoder mask batch
+                    decoder_mask_batch=[]
+                    for i in range(true_test_batch_size):
+                        Q_i = test_Q_list[test_para_id+i]
+                        decoder_vocab_Q = train_top_Q_wordids | set(list(np.unique(Q_i)))
+                        decoder_mask_ind = []
+                        for ele in decoder_vocab_batch:
+                            if ele in decoder_vocab_Q:
+                                decoder_mask_ind.append(1.0)
+                            else:
+                                decoder_mask_ind.append(0.0)
+                        decoder_mask_batch.append(decoder_mask_ind)
+                    decoder_mask_batch = np.asarray(decoder_mask_batch, dtype=theano.config.floatX)
+                        
+                    
+                    
+                    
                     decoder_vocab_batch = np.asarray(decoder_vocab_batch, dtype='int32')
                     pred_id_in_batch = test_model(
                                         test_para_list[test_para_id:test_para_id+test_batch_size],
                                         decoder_vocab_batch,
+                                        decoder_mask_batch,
                                         test_start_list[test_para_id:test_para_id+test_batch_size],
                                         test_end_list[test_para_id:test_para_id+test_batch_size],
                                         test_para_mask[test_para_id:test_para_id+test_batch_size])  #(batch, senlen)
@@ -303,20 +323,20 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=300, test_batc
                     back_pred_id_in_batch=[map_decoderid2encoderid.get(id) for id in pred_id_in_batch.flatten()]
 
 
-                    if idd == len(test_batch_start)-1:
-                        true_test_batch_size = remain_test
-                    else:
-                        true_test_batch_size=test_batch_size
+
                     for i in range(true_test_batch_size):
 #                         print 'pred_id_in_batch[i]:', pred_id_in_batch[i]
                         refined_preds, refined_g = refine_decoder_predictions(back_pred_id_in_batch[i*pred_q_len_limit:(i+1)*pred_q_len_limit], ground_truths[i], ground_mask[i])
 #                         bleu_i = nltk.translate.bleu_score.sentence_bleu([refined_g], refined_preds)
 #                         bleu_scores.append(bleu_i)
                         pred_q=''
+                        prev_w=''
                         for id in refined_preds:
                             word = id2word.get(id)
                             if word.isalnum():
-                                pred_q+=' '+word
+                                if word != prev_w:
+                                    pred_q+=' '+word
+                                    prev_w = word
                         outputfile.write(pred_q+' ?\n')
                         referencefile.write(' '.join([id2word.get(id) for id in refined_g])+'\n')
 

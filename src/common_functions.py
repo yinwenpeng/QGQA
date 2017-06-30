@@ -833,13 +833,13 @@ class LSTM_Decoder_Train_with_Attention(object):
 
 class LSTM_Decoder_Test_with_Attention(object):
 #     def __init__(self, X, Mask, hidden_dim, U, W, b):
-    def __init__(self, nsteps, Encoder_Tensor_Rep, Encoder_Mask, start_indices, end_indices, vocab_embs, emb__size, hidden_size,tparams,attention_para_dict1, attention_para_dict2):
+    def __init__(self, nsteps, Encoder_Tensor_Rep, Encoder_Mask, start_indices, end_indices, vocab_embs, decoder_mask,emb__size, hidden_size,tparams,attention_para_dict1, attention_para_dict2):
         #X (batch, emb_size, senLen) is the ground truth target words
         #Encoder_Tensor_Rep   (batch, hidden_size, senLen) is the hidden states from source side
         #hidden_size: the hidden size for the target side, we set it equal to emb size, so that compare with each vocab word emb
         #Mask: mask for target sentences
         #vocab_embs:  matrix (vocab_size, emb_size)
-        #decoder_mask:  (batch, vocab_size)
+        #decoder_mask:  (batch, decoder_vocab_size)
 
         if Encoder_Tensor_Rep.ndim == 3:
             n_samples = Encoder_Tensor_Rep.shape[0] #batch_size
@@ -884,7 +884,7 @@ class LSTM_Decoder_Test_with_Attention(object):
     
             h = o * T.tanh(c)  #(batch, emb_size)
             #compare with vocab embs
-            simi_batch = T.dot(h, vocab_embs.T) #(batch, vocab_size)
+            simi_batch = T.dot(h, vocab_embs.T)*decoder_mask #(batch, vocab_size)
             max_ids = T.argmax(simi_batch, axis=1) #batch
             x = vocab_embs[max_ids]  #(batch, emb_size)
             return max_ids, x, h, c
