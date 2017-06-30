@@ -312,7 +312,12 @@ def evaluate_lenet5(learning_rate=0.01, n_epochs=2000, batch_size=300, test_batc
                         refined_preds, refined_g = refine_decoder_predictions(back_pred_id_in_batch[i*pred_q_len_limit:(i+1)*pred_q_len_limit], ground_truths[i], ground_mask[i])
 #                         bleu_i = nltk.translate.bleu_score.sentence_bleu([refined_g], refined_preds)
 #                         bleu_scores.append(bleu_i)
-                        outputfile.write(' '.join([id2word.get(id) for id in refined_preds])+'\n')
+                        pred_q=''
+                        for id in refined_preds:
+                            word = id2word.get(id)
+                            if word.isalnum():
+                                pred_q+=' '+word
+                        outputfile.write(pred_q+' ?\n')
                         referencefile.write(' '.join([id2word.get(id) for id in refined_g])+'\n')
 
 #                 bleuscore =  np.average(np.array(bleu_scores))
